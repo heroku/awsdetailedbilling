@@ -149,23 +149,18 @@ var uploadFile = function(unzippedFileName) {
 		var unzippedLength = fs.statSync(unzippedFileName).size;
 		var unzippedReadStream = fs.createReadStream(unzippedFileName);
 
-		var uploadProgress = progress({
-			length: unzippedLength,
-			time: 1000
-		});
-		uploadProgress.on("progress", function(progress) {
-			percentage = numeral(progress.percentage/100).format('00.0%');
-			eta = moment.duration(progress.eta * 1000).humanize();
-			log.info(`${monthString} (upload): ${percentage} (${eta} at ${prettyBytes(progress.speed)}/sec)`);
-		});
-
 		var destParams = {
 			Bucket: args.dest_bucket,
 			Key: unzippedFileName,
-			Body: unzippedReadStream.pipe(uploadProgress)
+			Body: unzippedReadStream
 		};
 
-		stagingClient.upload(destParams, function(err, data) {
+		var request = stagingClient.upload(destParams);
+		request.on('httpUploadProgress', function(progress, response) {
+			percentage = numeral(progress.loaded / progress.total).format('00.0%');
+			log.info(`${monthString} (upload): ${percentage} (${progress.loaded}))`);
+		});
+		request.send(function(err, data) {
 			if (err) throw err;
 			resolve(`s3://${destParams.Bucket}/${destParams.Key}`);
 		});
