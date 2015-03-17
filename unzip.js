@@ -9,6 +9,7 @@ var prettyBytes = require('pretty-bytes');
 var moment = require('moment');
 var numeral = require('numeral');
 var log = require('loglevel');
+var pg = require('pg');
 
 var ArgumentParser = require('argparse').ArgumentParser;
 
@@ -29,6 +30,20 @@ parser.addArgument(
 	['-o', '--dest-bucket'], {
 		help: 'The destination S3 bucket name',
 		defaultValue: process.env.STAGING_BUCKET
+	}
+);
+
+parser.addArgument(
+	['-r', '--redshift-url'], {
+		help: 'The destination S3 bucket name',
+		defaultValue: process.env.REDSHIFT_URL
+	}
+);
+
+parser.addArgument(
+	['-t', '--target-table'], {
+		help: 'The redshift table to copy data into',
+		defaultValue: 'line_items'
 	}
 );
 
@@ -157,7 +172,26 @@ var uploadFile = function(unzippedFileName) {
 	});
 };
 
+var importToRedshift = function(s3uri) {
+	return new Promise(function(resolve, reject) {
+		var client = new pg.Client(args.redshift_url);
+		client.connect(function(err) {
+			if (err) throw err;
+			var query = `COPY ${args.target_table} FROM '${s3uri}' credentials 'aws_access_key_id=${stagingClientOptions.accessKeyId};aws_secret_access_key=${stagingClientOptions.secretAccessKey}' csv ignoreheader 1;`;
+			log.debug(query);
+			client.query(query, function(err, result) {
+				if (err) {
+					reject(`Error in COPY FROM: ${err}`);
+					return;
+				}
+				resolve(s3uri);
+			});
+		});
+	});
+};
+
 downloadFile.then(function(result) {
+	log.info(`${monthString} (unzip): Unzipping ${result}...`);
 	return unzipFile(result);
 }).then(function(result) {
 	log.info(`${monthString} (unzip): Unzipped ${result}`);
@@ -165,6 +199,11 @@ downloadFile.then(function(result) {
 	return uploadFile(result);
 }).then(function(result) {
 	log.info(`${monthString} (upload): Uploaded ${result}`);
+	log.info(`${monthString} (import): Importing to Redshift...`);
+	return importToRedshift(result);
+}).then(function(result) {
+	log.info(`${monthString} (import): COPY FROM issued successfully`);
+	process.exit();
 }).catch(function(err) {
 	log.error(err);
 });
