@@ -201,4 +201,5 @@ downloadFile.then(function(result) {
 	process.exit();
 }).catch(function(err) {
 	log.error(err);
+	process.exit();
 });
