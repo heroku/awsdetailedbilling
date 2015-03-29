@@ -3,14 +3,15 @@
 var util = require('util');
 var fs = require('fs');
 var AWS = require('aws-sdk');
-var yauzl = require('yauzl');
 var progress = require('progress-stream');
 var prettyBytes = require('pretty-bytes');
 var moment = require('moment');
 var numeral = require('numeral');
 var log = require('loglevel');
 var pg = require('pg');
-
+var child_process = require('child_process');
+var zlib = require('zlib');
+var debounce = require('debounce');
 var ArgumentParser = require('argparse').ArgumentParser;
 
 var parser = new ArgumentParser({
@@ -83,123 +84,200 @@ var stagingClientOptions = {
 	secretAccessKey: process.env.IDAN_AWS_SECRET_ACCESS_KEY
 };
 
-var sourceParams = {
-	Bucket: args.source_bucket,
-	Key: args.file
-};
+// We'll need these handy in various places
+var monthMatch = /(\d{4})-(\d{2})/.exec(args.file);
+var year = monthMatch[1];
+var month = monthMatch[2];
+var monthString = `${year}_${month}`;
+var monthDateString = `${year}-${month}-01`;
 
-var monthString = /\d{4}-\d{2}/.exec(args.file)[0];
-
+// S3 Clients for the DBR and staging buckets
 var dbrClient = new AWS.S3(dbrClientOptions);
 var stagingClient = new AWS.S3(stagingClientOptions);
 
-var downloadFile = new Promise(function(resolve, reject) {
-	var outStream = fs.createWriteStream(sourceParams.Key);
 
-	var downloadProgress = progress({
-		length: 0,
-		time: 1000
-	});
-	downloadProgress.on("progress", function(progress) {
-		percentage = numeral(progress.percentage/100).format('00.0%');
-		eta = moment.duration(progress.eta * 1000).humanize();
-		log.info(`${monthString} (download): ${percentage} (${eta} at ${prettyBytes(progress.speed)}/sec)`);
-	});
+// ==============================================================
+// Each of the major steps is a function which returns a promise.
+// ==============================================================
 
-	var request = dbrClient.getObject(sourceParams);
-	request.on('httpHeaders', function(status, headers, resp) {
-		totalLength = parseInt(headers['content-length'], 10);
-		downloadProgress.setLength(totalLength);
-	});
-
-	var zipfileStream = request.createReadStream();
-	zipfileStream.pipe(downloadProgress)
-				       .pipe(outStream);
-
-	outStream.on('close', function() {
-		resolve(args.file);
-	});
-});
-
-var unzipFile = function(zipFileName) {
-	// In theory, this handles multiple files inside a zip
-	// We know that this zipfile has only one file inside, the CSV
-	// hence we are resolving on the first successful unzipped file
+var downloadFile = function(bucket, key) {
+	// Downloads the specified DBR zip
+	log.info(`${monthString} (download): downloading '${key}' from S3...`);
 	return new Promise(function(resolve, reject) {
-		yauzl.open(zipFileName, function(err, file) {
-			if (err) throw err;
-			file.on('entry', function(entry) {
-				if (err) throw err;
-				outStream = fs.createWriteStream(entry.fileName);
-				file.openReadStream(entry, function(err, readStream){
-					if (err) throw err;
-					readStream.pipe(outStream);
-					outStream.on('close', function() {
-						resolve(entry.fileName);
-					});
-				});
-			});
+		var sourceParams = {
+			Bucket: bucket,
+			Key: key
+		};
+		var outStream = fs.createWriteStream(key);
+
+		var downloadProgress = progress({
+			length: 0,
+			time: 1000
+		});
+		downloadProgress.on("progress", function(progress) {
+			percentage = numeral(progress.percentage/100).format('00.0%');
+			eta = moment.duration(progress.eta * 1000).humanize();
+			log.info(`${monthString} (download): ${percentage} (${eta} at ${prettyBytes(progress.speed)}/sec)`);
+		});
+
+		var request = dbrClient.getObject(sourceParams);
+		request.on('httpHeaders', function(status, headers, resp) {
+			totalLength = parseInt(headers['content-length'], 10);
+			downloadProgress.setLength(totalLength);
+		});
+
+		var zipfileStream = request.createReadStream();
+		zipfileStream.pipe(downloadProgress)
+					       .pipe(outStream);
+
+		outStream.on('close', function() {
+			var durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
+			log.info(`${monthString} (download): complete (${durationString})`);
+			resolve(key);
 		});
 	});
 };
 
-var uploadFile = function(unzippedFileName) {
+var processZipFile = function(zipFileName) {
+	// Unzip, gzip, and upload to the staging bucket on S3
+	log.info(`${monthString} (process): processing '${zipFileName}'...`);
+
+	// In theory, zipfiles can contain multiple files
+	// We know that the DBR zip has only one file inside, the DBR CSV
 	return new Promise(function(resolve, reject) {
+		var uncompressedLength = parseInt(child_process.execSync(
+		  `zipinfo -t ${zipFileName} | cut -d ' ' -f 3`, {encoding: 'utf8'}
+		));
 
-		var unzippedLength = fs.statSync(unzippedFileName).size;
-		var unzippedReadStream = fs.createReadStream(unzippedFileName);
+		// Hack off the '.zip'
+		var plainFileName = zipFileName.substr(0, zipFileName.length - 4);
 
-		var destParams = {
-			Bucket: args.dest_bucket,
-			Key: unzippedFileName,
-			Body: unzippedReadStream
+		// For monitoring unzip progress
+		var unzipProgress = progress({time: 10000, length: uncompressedLength}, function(progress) {
+		  percentage = numeral(progress.percentage/100).format('00.0%');
+		  eta = moment.duration(progress.eta * 1000).humanize();
+		  log.info(`${monthString} (process-unzip): ${percentage} (${eta} at ${prettyBytes(progress.speed)}/sec)`);
+		});
+
+		// For monitoring gzip progress.
+		// From this point forward in the stream, we don't know the stream length as
+		// we don't know how much the stream will compress down to until it's done.
+		var gzipProgress = progress({time: 10000}, function(progress) {
+		  log.info(`${monthString} (process-gzip): ${prettyBytes(progress.transferred)} at ${prettyBytes(progress.speed)}/sec`);
+		});
+
+		// Hook up every part of the stream prior to the HTTP upload to S3
+		// Stream not flowing at this point! Triggered by request.send() below.
+		var unzipGzipStream = child_process.spawn('unzip', ['-p', './' + zipFileName])
+												               .stdout
+												               .pipe(unzipProgress)
+												               .pipe(zlib.createGzip())
+												               .pipe(gzipProgress);
+
+		// Prepare the upload to S3 with the stream as the body
+		var requestParams = {
+		  Bucket: process.env.STAGING_BUCKET,
+		  Key: `${plainFileName}.gz`,
+		  Body: unzipGzipStream
 		};
+		var request = stagingClient.upload(requestParams);
+		request.on('httpUploadProgress', debounce(function(progress) {
+			log.info(`${monthString} (process-upload): ${prettyBytes(progress.loaded)}`);
+		}, 1000, true));
 
-		var request = stagingClient.upload(destParams);
-		request.on('httpUploadProgress', function(progress, response) {
-			percentage = numeral(progress.loaded / progress.total).format('00.0%');
-			log.info(`${monthString} (upload): ${percentage} (${progress.loaded}))`);
-		});
+		// Fire the upload request, gets the stream flowing.
 		request.send(function(err, data) {
-			if (err) throw err;
-			resolve(`s3://${destParams.Bucket}/${destParams.Key}`);
+		  if (err) throw err;
+			var durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
+			log.info(`${monthString} (upload): complete (${durationString})`);
+			resolve(`s3://${requestParams.Bucket}/${requestParams.Key}`);
 		});
+
 	});
 };
 
 var importToRedshift = function(s3uri) {
+	// Import the gzipped DBR from the staging bucket into a staging table on
+	// redshift. Add the statement_month column and then copy from staging into
+	// line_items, then drop the staging table.
+	log.info(`${monthString} (import): importing to redshift...`);
 	return new Promise(function(resolve, reject) {
 		var client = new pg.Client(args.redshift_url);
 		client.connect(function(err) {
 			if (err) throw err;
-			var query = `COPY ${args.target_table} FROM '${s3uri}' credentials 'aws_access_key_id=${stagingClientOptions.accessKeyId};aws_secret_access_key=${stagingClientOptions.secretAccessKey}' csv ignoreheader 1;`;
+			var stagingTableName = `staging_${monthString}`;
+			var query = `
+				BEGIN;
+					-- can't create and alter because statement_month is the sortkey
+					-- must create from scratch
+					-- CREATE TABLE ${stagingTableName} (LIKE line_items);
+					-- ALTER TABLE ${stagingTableName} DROP COLUMN statement_month;
+
+					CREATE TABLE IF NOT EXISTS ${stagingTableName} (
+					  invoice_id TEXT,
+					  payer_account_id TEXT,
+					  linked_account_id TEXT,
+					  record_type TEXT,
+					  record_id TEXT,
+					  product_name TEXT,
+					  rate_id TEXT,
+					  subscription_id TEXT,
+					  pricing_plan_id TEXT,
+					  usage_type TEXT,
+					  operation TEXT,
+					  availability_zone TEXT,
+					  reserved_instance TEXT,
+					  item_description TEXT,
+					  usage_start_date TIMESTAMP,
+					  usage_end_date TIMESTAMP,
+					  usage_quantity FLOAT8,
+					  blended_rate NUMERIC(18,11),
+					  blended_cost NUMERIC(18,11),
+					  unblended_rate NUMERIC(18,11),
+					  unblended_cost NUMERIC(18,11),
+					  resource_id TEXT,
+					  cloud TEXT,
+					  slot TEXT,
+					  PRIMARY KEY(record_id)
+					) DISTSTYLE EVEN;
+
+					COPY ${stagingTableName}
+						FROM '${s3uri}'
+						CREDENTIALS 'aws_access_key_id=${stagingClientOptions.accessKeyId};aws_secret_access_key=${stagingClientOptions.secretAccessKey}'
+						GZIP CSV IGNOREHEADER 1;
+					ALTER TABLE ${stagingTableName} ADD COLUMN statement_month DATE DEFAULT '${monthDateString}';
+					INSERT INTO line_items SELECT * FROM ${stagingTableName};
+					DROP TABLE ${stagingTableName};
+				COMMIT;
+				-- ANALYZE line_items;
+				-- VACUUM line_items;
+			`;
 			log.debug(query);
 			client.query(query, function(err, result) {
-				if (err) {
-					reject(`Error in COPY FROM: ${err}`);
-					return;
-				}
+				if (err) throw err;
+				var durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
+				log.info(`${monthString} (import): complete (${durationString})`);
 				resolve(s3uri);
 			});
 		});
 	});
 };
 
-downloadFile.then(function(result) {
-	log.info(`${monthString} (unzip): Unzipping ${result}...`);
-	return unzipFile(result);
-}).then(function(result) {
-	log.info(`${monthString} (unzip): Unzipped ${result}`);
-	log.info(`${monthString} (upload): Uploading to ${args.dest_bucket}...`);
-	return uploadFile(result);
-}).then(function(result) {
-	log.info(`${monthString} (upload): Uploaded ${result}`);
-	log.info(`${monthString} (import): Importing to Redshift...`);
-	return importToRedshift(result);
-}).then(function(result) {
-	log.info(`${monthString} (import): COPY FROM issued successfully`);
-	process.exit();
-}).catch(function(err) {
-	log.error(err);
-	process.exit();
-});
+
+// Kick off the promise chain.
+var startTime = moment.utc();
+downloadFile(args.source_bucket, args.file)
+	.then(processZipFile)
+	.then(importToRedshift)
+	.then(function(s3uri) {
+	  var durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
+		log.info(`${monthString}: Import complete! Took ${durationString}`);
+		process.exit();
+	})
+	.catch(function(err) {
+		var durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
+		log.error(`${monthString}: Something went terribly wrong after ${durationString}`);
+		log.error(err);
+		log.error(err.stack);
+		process.exit();
+	});

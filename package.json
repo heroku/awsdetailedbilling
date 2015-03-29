@@ -10,13 +10,13 @@
   "dependencies": {
     "argparse": "^1.0.1",
     "aws-sdk": "^2.1.17",
+    "debounce": "^1.0.0",
     "loglevel": "^1.2.0",
     "moment": "^2.9.0",
     "numeral": "^1.5.3",
     "pg": "^4.3.0",
     "pretty-bytes": "^1.0.3",
-    "progress-stream": "^1.0.1",
-    "yauzl": "^2.2.1"
+    "progress-stream": "^1.0.1"
   },
   "engines": {
     "iojs": "1.5.x"
