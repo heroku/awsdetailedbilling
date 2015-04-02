@@ -20,6 +20,6 @@
     "rollbar": "^0.4.5"
   },
   "engines": {
-    "iojs": "1.5.x"
+    "iojs": "1.6.x"
   }
 }
