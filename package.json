@@ -16,7 +16,8 @@
     "numeral": "^1.5.3",
     "pg": "^4.3.0",
     "pretty-bytes": "^1.0.3",
-    "progress-stream": "^1.0.1"
+    "progress-stream": "^1.0.1",
+    "rollbar": "^0.4.5"
   },
   "engines": {
     "iojs": "1.5.x"

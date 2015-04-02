@@ -14,6 +14,9 @@ var zlib = require('zlib');
 var debounce = require('debounce');
 var ArgumentParser = require('argparse').ArgumentParser;
 
+var rollbar = require('rollbar');
+rollbar.init(process.env.ROLLBAR_TOKEN);
+
 var parser = new ArgumentParser({
   version: '0.0.1',
   addHelp: true,
@@ -279,5 +282,6 @@ downloadFile(args.source_bucket, args.file)
     log.error(`${monthString}: Something went terribly wrong after ${durationString}`);
     log.error(err);
     log.error(err.stack);
+		rollbar.handleError(err);
     process.exit();
   });
