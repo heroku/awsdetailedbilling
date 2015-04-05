@@ -11,6 +11,7 @@
     "argparse": "^1.0.1",
     "aws-sdk": "^2.1.17",
     "debounce": "^1.0.0",
+    "lodash": "^3.6.0",
     "loglevel": "^1.2.0",
     "moment": "^2.9.0",
     "numeral": "^1.5.3",
