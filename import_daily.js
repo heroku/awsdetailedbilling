@@ -19,6 +19,7 @@ var moment = require('moment');
 var BaseParser = require('./lib/baseparser.js');
 var DBR = require('./lib/dbr.js');
 var Redshift = require('./lib/redshift.js');
+var cliUtils = require('./lib/cliutils.js');
 
 rollbar.init(process.env.ROLLBAR_TOKEN, {environment: process.env.ROLLBAR_ENVIRONMENT});
 
@@ -60,13 +61,6 @@ var redshift = new Redshift(args.redshift_uri, {
       secret: args.staging_secret
 });
 
-function rejectHandler(err) {
-  rollbar.handleError(err);
-  log.error(err);
-  log.error("Aborting run.");
-  process.exit(1);
-}
-
 let startTime = moment.utc();
 
 dbr.getMonthToDateDBR()
@@ -83,4 +77,4 @@ dbr.getMonthToDateDBR()
      let durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
      log.info("Run complete. Took ${durationString}");
    })
-   .catch(rejectHandler);
+   .catch(cliUtils.rejectHandler);
