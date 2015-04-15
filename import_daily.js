@@ -74,25 +74,25 @@ var redshift = new Redshift(args.redshift_uri, {
 
 let startTime = moment.utc();
 
-dbr.getMonthToDateDBR()
-   .then(function(monthToDateDBR) {
-     log.info(`Importing ${monthToDateDBR.Date.format("MMMM YYYY")} into month_to_date...`);
-     if (args.no_stage) {
-       log.info(`--no-stage specified, Attempting to use existing staged month-to-date DBR`);
-       let s3uri = dbr.composeStagedURI(monthToDateDBR);
-       log.debug(`Importing from ${s3uri}`);
-       return redshift.importMonthToDate(s3uri);
-     } else {
-       return dbr.stageDBR(monthToDateDBR.Date)
-                 .then(redshift.importMonthToDate);
-     }
-   })
-   .then(function() {
-     log.info("Running VACUUM on month_to_date...");
-     return redshift.vacuum('month_to_date');
-   })
-   .then(function() {
-     let durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
-     log.info(`Run complete. Took ${durationString}`);
-   })
-   .catch(cliUtils.rejectHandler);
+dbr.getMonthToDateDBR().then(function(monthToDateDBR) {
+  log.info(`Importing ${monthToDateDBR.Date.format("MMMM YYYY")} into month_to_date...`);
+  if (args.no_stage) {
+    let s3uri = dbr.composeStagedURI(monthToDateDBR);
+    log.info(`--no-stage specified, Attempting to use existing staged month-to-date DBR`);
+    log.debug(`Importing from ${s3uri}`);
+    return redshift.importMonthToDate(s3uri);
+  } else {
+    return dbr.composeStagedURI(monthToDateDBR)
+    .then(function(s3uri) {
+      // TODO if we just chain like .then(redshift.importMonthToDate), it fails
+      // because "this" inside importMonthToDate will be undefined. Why?
+      return redshift.importMonthToDate(s3uri);
+    });
+  }
+}).then(function() {
+  log.info("Running VACUUM on month_to_date...");
+  return redshift.vacuum('month_to_date');
+}).then(function() {
+  let durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
+  log.info(`Run complete. Took ${durationString}`);
+}).catch(cliUtils.rejectHandler);
