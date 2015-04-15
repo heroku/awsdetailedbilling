@@ -79,13 +79,6 @@ var redshift = new Redshift(args.redshift_uri, {
       secret: args.staging_secret
 });
 
-// function rejectHandler(err) {
-//   rollbar.handleError(err);
-//   log.error(err);
-//   log.error("Aborting run.");
-//   process.exit(1);
-// }
-
 let startTime = moment.utc();
 
 redshift.latestFullMonth()    // get the latest full month in redshift
@@ -106,7 +99,8 @@ redshift.latestFullMonth()    // get the latest full month in redshift
       log.debug(`Found staged ${dbrMonth}!`);
       if (!args.force) {
         log.warn(`Using existing staged DBR for ${dbrMonth}.`);
-        let s3uri = `s3://${args.staging_bucket}/${stagedDBR.key}`;
+        let s3uri = `s3://${args.staging_bucket}/${stagedDBR.Key}`;
+        log.debug(`Staged s3uri: ${s3uri}`);
         return redshift.importFullMonth(s3uri, stagedDBR.Date);
       } else {
         log.warn(`--force specified, overwriting staged DBR for ${dbrMonth}`);
