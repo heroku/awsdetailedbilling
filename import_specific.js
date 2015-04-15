@@ -137,6 +137,6 @@ dbr.findStagedDBR(target)
   })
   .then(function() {
     let durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
-    log.info("Run complete. Took ${durationString}");
+    log.info(`Run complete. Took ${durationString}`);
   })
   .catch(cliUtils.rejectHandler);
