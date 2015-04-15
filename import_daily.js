@@ -80,10 +80,11 @@ dbr.getMonthToDateDBR()
      if (args.no_stage) {
        log.info(`--no-stage specified, Attempting to use existing staged month-to-date DBR`);
        let s3uri = dbr.composeStagedURI(monthToDateDBR);
+       log.debug(`Importing from ${s3uri}`);
        return redshift.importMonthToDate(s3uri);
      } else {
        return dbr.stageDBR(monthToDateDBR.Date)
-                 .then(redshift.importMonthToDate);       
+                 .then(redshift.importMonthToDate);
      }
    })
    .then(function() {
