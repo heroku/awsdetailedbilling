@@ -64,9 +64,9 @@ var redshift = new Redshift(args.redshift_uri, {
 let startTime = moment.utc();
 
 dbr.getMonthToDateDBR()
-   .then(function(dbr) {
-     log.info(`Importing ${dbr.Date.format("MMMM YYYY")} into month_to_date...`);
-     return dbr.stageDBR(dbr.Date)
+   .then(function(monthToDateDBR) {
+     log.info(`Importing ${monthToDateDBR.Date.format("MMMM YYYY")} into month_to_date...`);
+     return dbr.stageDBR(monthToDateDBR.Date)
                .then(redshift.importMonthToDate);
    })
    .then(function() {
