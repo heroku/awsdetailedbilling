@@ -11,6 +11,8 @@ Import month-to-date DBRs, overwriting the existing month-to-date.
 
 
 var util = require('util');
+var path = require('path');
+
 var log = require('loglevel');
 var ArgumentParser = require('argparse').ArgumentParser;
 var rollbar = require('rollbar');
@@ -29,6 +31,15 @@ var parser = new BaseParser({
   addHelp: true,
   description: "Imports month-to-date detailed billing reports"
 });
+
+parser.addArgument(
+  ['--no-stage'], {
+    action: 'storeConst',
+    dest: 'no_stage',
+    help: 'Use an existing staged month-to-date DBR.',
+    constant: true
+  }
+);
 
 var args = parser.parseArgs();
 
@@ -66,8 +77,14 @@ let startTime = moment.utc();
 dbr.getMonthToDateDBR()
    .then(function(monthToDateDBR) {
      log.info(`Importing ${monthToDateDBR.Date.format("MMMM YYYY")} into month_to_date...`);
-     return dbr.stageDBR(monthToDateDBR.Date)
-               .then(redshift.importMonthToDate);
+     if (args.no_stage) {
+       log.info(`--no-stage specified, Attempting to use existing staged month-to-date DBR`);
+       let s3uri = dbr.composeStagedURI(monthToDateDBR);
+       return redshift.importMonthToDate(s3uri);
+     } else {
+       return dbr.stageDBR(monthToDateDBR.Date)
+                 .then(redshift.importMonthToDate);       
+     }
    })
    .then(function() {
      log.info("Running VACUUM on month_to_date...");
