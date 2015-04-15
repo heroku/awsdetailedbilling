@@ -82,8 +82,7 @@ dbr.getMonthToDateDBR().then(function(monthToDateDBR) {
     log.debug(`Importing from ${s3uri}`);
     return redshift.importMonthToDate(s3uri);
   } else {
-    return dbr.composeStagedURI(monthToDateDBR)
-    .then(function(s3uri) {
+    return dbr.stageDBR(monthToDateDBR.Date).then(function(s3uri) {
       // TODO if we just chain like .then(redshift.importMonthToDate), it fails
       // because "this" inside importMonthToDate will be undefined. Why?
       return redshift.importMonthToDate(s3uri);
