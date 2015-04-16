@@ -81,52 +81,80 @@ var redshift = new Redshift(args.redshift_uri, {
 
 let startTime = moment.utc();
 
-redshift.latestFullMonth()    // get the latest full month in redshift
-  .catch(cliUtils.rejectHandler)       // fail early if something broke
-                              // TODO: handle empty redshift case
-  .then(function(month) {     // found something, look for the following month
-    log.debug(`Latest final DBR in redshift is ${month.format('MMMM YYYY')}`);
 
-    // Sigh, moment.add mutates the original moment instead of returning a new one.
-    // Clone it first.
-    let target = moment(month).add(1, 'months');
-    log.debug(`Now looking for ${target.format('MMMM YYYY')}`);
+// get last month
+// verify that
 
-    // See if we have a DBR already staged for that month
-    return dbr.findStagedDBR(target).then(function(stagedDBR) {
-      // We do have that staged already!
-      let dbrMonth = stagedDBR.Date.format('MMMM YYYY');
-      log.debug(`Found staged ${dbrMonth}!`);
+dbr.getLatestFinalizedDBR()
+  .then(importDBRCheck)
+  .then(stageDBRCheck)
+  .then(importDBR)
+  .then(vacuum)
+  .then(function() {
+    cliUtils.runCompleteHandler(startTime, 0);
+  })
+  .catch(cliUtils.rejectHandler);
+
+
+// Given a latest finalized DBR object, decide whether to import it
+function importDBRCheck(finalizedDBR) {
+  return redshift.hasMonth(finalizedDBR.Month).then(function(hasMonth) {
+    if (hasMonth) {
+      log.info(`No new DBRs to import.`);
+      cliUtils.runCompleteHandler(startTime, 0);
+    } else {
+      return finalizedDBR;
+    }
+  });
+}
+
+
+// Given a DBR, (optionally) stage it
+function stageDBRCheck(finalizedDBR) {
+  return dbr.findStagedDBR(finalizedDBR.Month).then(
+    function(stagedDBR) {
+      let dbrMonth = stagedDBR.Month.format("MMMM YYYY");
+      // DBR is staged!
       if (!args.force) {
+        // No need to re-stage
         log.warn(`Using existing staged DBR for ${dbrMonth}.`);
         let s3uri = `s3://${args.staging_bucket}/${stagedDBR.Key}`;
         log.debug(`Staged s3uri: ${s3uri}`);
-        return redshift.importFullMonth(s3uri, stagedDBR.Date);
+        return ({s3uri: s3uri, month: stagedDBR.Month});
       } else {
+        // Force re-stage
         log.warn(`--force specified, overwriting staged DBR for ${dbrMonth}`);
-        return dbr.stageDBR(stagedDBR.date).then(function(s3uri) {
-          return redshift.importFullMonth(s3uri, stagedDBR.Date);
+        return dbr.stageDBR(stagedDBR.Month).then(function(s3uri) {
+          return ({s3uri: s3uri, month: stagedDBR.Month});
         });
       }
-    }, function(reason) {
-      // We don't have that DBR staged!
-      return dbr.stageDBR(target).then(function(s3uri) {
-        return redshift.importFullMonth(s3uri, target);
+    },
+    function(err) {
+      // DBR not staged. Stage then import.
+      log.info(`Staging DBR for ${finalizedDBR.Month.format("MMMM YYYY")}.`);
+      return dbr.stageDBR(finalizedDBR.Month).then(function(s3uri) {
+        return ({s3uri: s3uri, month: finalizedDBR.Month});
       });
-    });
-  })
-  .then(function(result) {
-    // import was successful
-    if (!args.no_vacuum) {
-      log.info("Running VACUUM on line_items...");
-      return redshift.vacuum('line_items');
-    } else {
-      log.info("--no-vacuum specified, skiping vacuum.");
-      return;
     }
-  })
-  .then(function() {
-    let durationString = moment.utc(moment.utc() - startTime).format("HH:mm:ss.SSS");
-    log.info(`Run complete. Took ${durationString}`);
-  })
-  .catch(cliUtils.rejectHandler);
+  );
+}
+
+
+// Given an objet like {s3uri: <uri>, month: <moment>}
+// Issue an import
+function importDBR(params) {
+  log.info(`Importing DBR for ${params.month.format("MMMM YYYY")}`);
+  return redshift.importFullMonth(params.s3uri, params.month);
+}
+
+
+// Run VACUUM on the line_items table
+function vacuum() {
+  if (!args.no_vacuum) {
+    log.info("Running VACUUM on line_items...");
+    return redshift.vacuum(process.env.LINE_ITEMS_TABLE_NAME || 'line_items');
+  } else {
+    log.info("--no-vacuum specified, skiping vacuum.");
+    return;
+  }
+}
