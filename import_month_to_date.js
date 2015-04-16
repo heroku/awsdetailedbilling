@@ -24,6 +24,8 @@ var Redshift = require('./lib/redshift.js');
 var cliUtils = require('./lib/cliutils.js');
 
 rollbar.init(process.env.ROLLBAR_TOKEN, {environment: process.env.ROLLBAR_ENVIRONMENT});
+rollbar.handleUncaughtExceptions(process.env.ROLLBAR_TOKEN,
+                                 {exitOnUncaughtException: true});
 
 
 var parser = new BaseParser({
