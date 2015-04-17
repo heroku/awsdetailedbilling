@@ -88,14 +88,14 @@ dbr.getMonthToDateDBR()
 
 // Determine whether to stage the latest month-to-date DBR or reuse existing
 function stageDBRCheck(monthToDateDBR) {
-  log.info(`Importing ${monthToDateDBR.Date.format("MMMM YYYY")} into month_to_date...`);
+  log.info(`Importing ${monthToDateDBR.Month.format("MMMM YYYY")} into month_to_date...`);
   if (args.no_stage) {
     let s3uri = dbr.composeStagedURI(monthToDateDBR);
     log.info(`--no-stage specified, Attempting to use existing staged month-to-date DBR`);
     log.debug(`Importing from ${s3uri}`);
     return s3uri;
   } else {
-    return dbr.stageDBR(monthToDateDBR.Date);
+    return dbr.stageDBR(monthToDateDBR.Month);
   }
 }
 
