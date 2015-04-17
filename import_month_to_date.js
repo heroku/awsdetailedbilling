@@ -88,13 +88,14 @@ dbr.getMonthToDateDBR()
 
 // Determine whether to stage the latest month-to-date DBR or reuse existing
 function stageDBRCheck(monthToDateDBR) {
-  log.info(`Importing ${monthToDateDBR.Month.format("MMMM YYYY")} into month_to_date...`);
+  log.info(`Found month-to-date for ${monthToDateDBR.Month.format("MMMM YYYY")}...`);
   if (args.no_stage) {
     let s3uri = dbr.composeStagedURI(monthToDateDBR);
     log.info(`--no-stage specified, Attempting to use existing staged month-to-date DBR`);
     log.debug(`Importing from ${s3uri}`);
     return s3uri;
   } else {
+    log.info(`Staging DBR file for ${monthToDateDBR.Month.format("MMMM YYYY")}.`);
     return dbr.stageDBR(monthToDateDBR.Month);
   }
 }
@@ -104,6 +105,7 @@ function stageDBRCheck(monthToDateDBR) {
 // TODO if we just chain like .then(redshift.importMonthToDate), it fails
 // because "this" inside importMonthToDate will be undefined. Why?
 function importDBR(s3uri) {
+  log.info(`Importing ${monthToDateDBR.Month.format("MMMM YYYY")} into month_to_date...`);
   return redshift.importMonthToDate(s3uri);
 }
 
