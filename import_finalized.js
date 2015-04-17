@@ -41,15 +41,6 @@ parser.addArgument(
   }
 );
 
-parser.addArgument(
-  ['--no-vacuum'], {
-    action: 'storeConst',
-    dest: 'no_vacuum',
-    help: 'Do not automatically run VACUUM following the import.',
-    constant: true
-  }
-);
-
 var args = parser.parseArgs();
 
 if (args.debug) {
