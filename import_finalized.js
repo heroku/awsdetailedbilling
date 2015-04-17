@@ -11,6 +11,7 @@ Import finalized monthly DBRs.
 
 
 var util = require('util');
+
 var log = require('loglevel');
 var ArgumentParser = require('argparse').ArgumentParser;
 var rollbar = require('rollbar');
@@ -74,10 +75,6 @@ var redshift = new Redshift(args.redshift_uri, {
 
 let startTime = moment.utc();
 
-
-// get last month
-// verify that
-
 dbr.getLatestFinalizedDBR()
   .then(importDBRCheck)
   .then(stageDBRCheck)
@@ -133,8 +130,8 @@ function stageDBRCheck(finalizedDBR) {
 }
 
 
-// Given an objet like {s3uri: <uri>, month: <moment>}
-// Issue an import
+// Given an object like {s3uri: <uri>, month: <moment>}
+// Execute the import.
 function importDBR(params) {
   log.info(`Importing DBR for ${params.month.format("MMMM YYYY")}`);
   return redshift.importFullMonth(params.s3uri, params.month);
