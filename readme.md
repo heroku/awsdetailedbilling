@@ -2,6 +2,8 @@
 
 Loads AWS detailed billing reports into a redshift cluster.
 
+[![js-standard-style](https://cdn.rawgit.com/feross/standard/master/badge.svg)](https://github.com/feross/standard)
+
 
 # Setup
 
