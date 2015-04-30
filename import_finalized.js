@@ -40,6 +40,13 @@ parser.addArgument(
   }
 )
 
+parser.addArgument(
+  ['--prune-months'], {
+    help: 'The amount of history (in number of months) to retain in Redshift',
+    type: 'int'
+  }
+)
+
 var args = parser.parseArgs()
 
 if (args.debug) {
@@ -49,6 +56,13 @@ if (args.debug) {
   log.setLevel('info')
 }
 log.debug(`Resolved invocation arguments were:\n${util.inspect(args)}`)
+
+if (args.specific !== null && args.prune_months !== null) {
+  log.error('The "--specific" and "--prune-months" options are mutually exclusive.')
+  log.error('--prune-months can only be invoked when importing the latest DBR.')
+  log.error('Aborting.')
+  process.exit(1)
+}
 
 // Instantiate a DBR object to work with.
 var dbrClientOptions = {
@@ -152,7 +166,15 @@ function stageDBRCheck (finalizedDBR) {
 // Execute the import.
 function importDBR (params) {
   log.info(`Importing DBR for ${params.month.format('MMMM YYYY')}`)
-  return redshift.importFullMonth(params.s3uri, params.month)
+  if (args.prune_months !== null) {
+    let pruneThreshold = moment(params.month)
+      .subtract(args.prune_months, 'months')
+      .format('MMMM YYYY')
+    log.info(`... and pruning months prior to ${pruneThreshold}`)
+    return redshift.importFullMonth(params.s3uri, params.month, args.prune_months)
+  } else {
+    return redshift.importFullMonth(params.s3uri, params.month)
+  }
 }
 
 // Run VACUUM on the line_items table
