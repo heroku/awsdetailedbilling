@@ -85,17 +85,21 @@ chooseDBR()
 function chooseDBR () {
   return new Promise(function (resolve, reject) {
     if (args.specific) {
+      log.debug(`Invoked with --specific ${args.specific}.`)
       try {
         let match = /^(\d{4})-(\d{2})$/.exec(args.specific)
         if (match === null) {
           return reject('--specific requires a year and month parameter in the form of YYYY-MM')
         }
-        let month = moment.utc([match[1], match[2]])
+        // moment.utc month argument is zero-indexed
+        let month = moment.utc([match[1], match[2] - 1])
+        log.debug(`Attempting to import ${month.toISOString()}`)
         return resolve(dbr.findDBR(month))
       } catch (err) {
         return reject(err)
       }
     } else {
+      log.debug(`Invoked without --specific. Targeting latest finalized DBR...`)
       return resolve(dbr.getLatestFinalizedDBR())
     }
   })
