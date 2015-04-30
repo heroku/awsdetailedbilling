@@ -34,6 +34,12 @@ parser.addArgument(
   }
 )
 
+parser.addArgument(
+  ['--specific'], {
+    help: "Import a specific month's DBR. Specified in YYYY-MM format."
+  }
+)
+
 var args = parser.parseArgs()
 
 if (args.debug) {
@@ -66,7 +72,7 @@ var redshift = new Redshift(args.redshift_uri, {
 
 let startTime = moment.utc()
 
-dbr.getLatestFinalizedDBR()
+chooseDBR()
   .then(importDBRCheck)
   .then(stageDBRCheck)
   .then(importDBR)
@@ -75,6 +81,25 @@ dbr.getLatestFinalizedDBR()
     cliUtils.runCompleteHandler(startTime, 0)
   })
   .catch(cliUtils.rejectHandler)
+
+function chooseDBR () {
+  return new Promise(function (resolve, reject) {
+    if (args.specific) {
+      try {
+        let match = /^(\d{4})-(\d{2})$/.exec(args.specific)
+        if (match === null) {
+          return reject('--specific requires a year and month parameter in the form of YYYY-MM')
+        }
+        let month = moment.utc([match[1], match[2]])
+        return resolve(dbr.findDBR(month))
+      } catch (err) {
+        return reject(err)
+      }
+    } else {
+      return resolve(dbr.getLatestFinalizedDBR())
+    }
+  })
+}
 
 // Given a latest finalized DBR object, decide whether to import it
 function importDBRCheck (finalizedDBR) {
