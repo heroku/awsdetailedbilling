@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS ri_leases (
   start_date DATE,
   end_date DATE,
   lease_term TEXT,
-  az TEXT,
+  availability_zone TEXT,
   instance_type TEXT,
   os TEXT,
   utilization TEXT,
