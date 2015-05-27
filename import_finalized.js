@@ -29,7 +29,7 @@ parser.addArgument(
   ['--force'], {
     action: 'storeConst',
     dest: 'force',
-    help: 'Ignore and overwrite an existing staged DBR.',
+    help: 'Ignore existing DBRs in staging or redshift, and reimport them.',
     constant: true
   }
 )
@@ -121,9 +121,14 @@ function chooseDBR () {
 
 // Given a latest finalized DBR object, decide whether to import it
 function importDBRCheck (finalizedDBR) {
+  let dbrMonth = finalizedDBR.Month.format('MMMM YYYY')
   return redshift.hasMonth(finalizedDBR.Month).then(function (hasMonth) {
     if (hasMonth) {
       log.info(`No new DBRs to import.`)
+      if (args.force) {
+        log.warn(`--force specified, importing DBR for ${dbrMonth} anyways`)
+        return finalizedDBR
+      }
       cliUtils.runCompleteHandler(startTime, 0)
     } else {
       return finalizedDBR
